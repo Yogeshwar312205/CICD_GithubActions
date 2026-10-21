@@ -5,19 +5,22 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: [main]
+    branches: ["main"]
+
+permissions:
+  contents: read
 
 jobs:
   ci:
     name: Test and build Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -39,19 +42,34 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Verify Docker is running
+        shell: powershell
+        run: |
+          docker info
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker Desktop is not running or Docker is unavailable."
+          }
 
       - name: Build Docker image
         shell: powershell
         run: |
           docker build -t node-ci-cd-demo:latest .
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker image build failed."
+          }
 
       - name: Deploy container
         shell: powershell
         run: |
-          $existing = docker ps -aq --filter "name=^node-ci-cd-demo$"
+          $existing = docker ps -aq --filter "name=^/node-ci-cd-demo$"
+
           if ($existing) {
             docker rm -f node-ci-cd-demo
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not remove the existing container."
+            }
           }
 
           docker run -d `
@@ -60,14 +78,30 @@ jobs:
             -p 3001:3000 `
             node-ci-cd-demo:latest
 
+          if ($LASTEXITCODE -ne 0) {
+            throw "Container deployment failed."
+          }
+
       - name: Verify deployment
         shell: powershell
         run: |
           Start-Sleep -Seconds 5
-          $response = Invoke-RestMethod http://localhost:3001/health
+
+          $response = $null
+          try {
+            $response = Invoke-RestMethod `
+              -Uri "http://localhost:3001/health" `
+              -TimeoutSec 10
+          }
+          catch {
+            docker logs node-ci-cd-demo
+            throw "Deployment health check failed."
+          }
+
           if ($response.status -ne "OK") {
             docker logs node-ci-cd-demo
-            throw "Deployment health check failed"
+            throw "Health endpoint did not return status OK."
           }
+
           Write-Host "Deployment successful!"
           $response | ConvertTo-Json
