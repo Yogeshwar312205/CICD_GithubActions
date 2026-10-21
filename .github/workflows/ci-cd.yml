@@ -1,8 +1,9 @@
+
 name: CI and CD
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
     branches: [main]
 
@@ -18,7 +19,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -28,18 +29,45 @@ jobs:
         run: npm test
 
       - name: Build Docker image
-        run: docker build --tag github-actions-docker-demo:${{ github.sha }} .
+        run: docker build --tag node-ci-cd-demo:${{ github.sha }} .
 
   cd:
-    name: Deploy to Render
+    name: Deploy to local Docker
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
-      - name: Trigger Render deploy hook
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        shell: powershell
         run: |
-          test -n "$RENDER_DEPLOY_HOOK_URL"
-          curl --fail --show-error --silent --request POST "$RENDER_DEPLOY_HOOK_URL"
+          docker build -t node-ci-cd-demo:latest .
+
+      - name: Deploy container
+        shell: powershell
+        run: |
+          $existing = docker ps -aq --filter "name=^node-ci-cd-demo$"
+          if ($existing) {
+            docker rm -f node-ci-cd-demo
+          }
+
+          docker run -d `
+            --name node-ci-cd-demo `
+            --restart unless-stopped `
+            -p 3001:3000 `
+            node-ci-cd-demo:latest
+
+      - name: Verify deployment
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 5
+          $response = Invoke-RestMethod http://localhost:3001/health
+          if ($response.status -ne "OK") {
+            docker logs node-ci-cd-demo
+            throw "Deployment health check failed"
+          }
+          Write-Host "Deployment successful!"
+          $response | ConvertTo-Json
