@@ -1,0 +1,13 @@
+{
+  "name": "github-actions-docker-demo",
+  "version": "1.0.0",
+  "description": "A small Express application for learning GitHub Actions, Docker, and Render.",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
